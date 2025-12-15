@@ -1,0 +1,19 @@
+# Qt / CMake build directories
+build/
+build-*/
+
+# Qt Creator user files
+*.pro.user
+.qtcreator/
+
+# Compiled files
+*.o
+*.obj
+*.exe
+
+# Qt Creator autosave
+*.autosave
+
+# OS files
+.DS_Store
+Thumbs.db
