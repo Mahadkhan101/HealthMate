@@ -1,595 +1,551 @@
 #include "mainwindow.h"
-#include "ui_mainwindow.h"
-#include <QString>
+#include <QHeaderView>
 #include <QFileDialog>
 #include <QMessageBox>
-#include <fstream>
-#include <QFile>
-#include <QTextStream>
-#include <QFileInfo>
-#include <QPdfWriter>
 #include <QPainter>
+#include <QPdfWriter>
 #include <QDate>
-using namespace std;
+#include <fstream>
 
-MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent)
-    , ui(new Ui::MainWindow)
-{
-    ui->setupUi(this);
-    ui->tabWidget->setCurrentIndex(0);
-    connect(ui->pushButton, &QPushButton::clicked,
-            this, &MainWindow::onSaveProfileClicked);
+MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+    setupModernUI();
+    loadAllData();
+}
 
-    connect(ui->pushButtonAddHistory,&QPushButton::clicked,
-            this,&MainWindow::onAddHistoryClicked);
+MainWindow::~MainWindow() {}
 
-    connect(ui->pushButtonRemoveHistory,&QPushButton::clicked,
-            this,&MainWindow::onRemoveHistoryClicked);
+void MainWindow::setupModernUI() {
+    // High-Tech Global Stylesheet
+    this->setStyleSheet(R"(
+        QMainWindow { background-color: #0F172A; }
+        QWidget#Sidebar {
+            background-color: #1E293B;
+            border-right: 1px solid #334155;
+        }
+        QLabel#HeaderLabel {
+            color: #38BDF8; font-size: 18px; font-weight: bold; padding: 10px;
+        }
+        QPushButton#NavBtn {
+            background: transparent; color: #94A3B8;
+            border: none; padding: 15px; text-align: left;
+            font-size: 13px; font-weight: bold; border-left: 3px solid transparent;
+        }
+        QPushButton#NavBtn:hover { background-color: #334155; color: #38BDF8; }
+        QPushButton#NavBtn:checked {
+            background-color: #0EA5E9; color: white; border-left: 3px solid #38BDF8;
+        }
+        QTableWidget {
+            background-color: #1E293B; color: white; gridline-color: #334155;
+            border: 1px solid #334155; border-radius: 8px; font-size: 10pt;
+        }
+        QHeaderView::section { background-color: #0F172A; color: #38BDF8; padding: 8px; border: none; font-weight: bold; }
+        QLineEdit, QTextEdit, QSpinBox, QTimeEdit, QComboBox {
+            background-color: #334155; border: 1px solid #475569;
+            border-radius: 6px; color: white; padding: 8px; selection-background-color: #0EA5E9;
+        }
+        QPushButton#ActionBtn {
+            background-color: #10B981; color: white; border-radius: 6px;
+            padding: 10px; font-weight: bold; font-size: 11pt;
+        }
+        QPushButton#ActionBtn:hover { background-color: #059669; }
+        QPushButton#SecondaryBtn {
+            background-color: #EF4444; color: white; border-radius: 6px; padding: 10px; font-weight: bold;
+        }
+        QProgressBar {
+            border: 1px solid #334155; border-radius: 12px; background: #1E293B;
+            text-align: center; color: white; font-weight: bold; height: 25px;
+        }
+        QProgressBar::chunk { background-color: #0EA5E9; border-radius: 12px; }
+        QLabel { color: #E2E8F0; font-weight: 500; }
+    )");
 
-    connect(ui->add250Button, &QPushButton::clicked,
-            this, &MainWindow::onAdd250);
+    QWidget *central = new QWidget();
+    QHBoxLayout *mainLayout = new QHBoxLayout(central);
+    mainLayout->setContentsMargins(0,0,0,0);
+    mainLayout->setSpacing(0);
 
-    connect(ui->add500Button, &QPushButton::clicked,
-            this, &MainWindow::onAdd500);
+    // --- Sidebar Setup ---
+    sidebar = new QWidget();
+    sidebar->setObjectName("Sidebar");
+    sidebar->setFixedWidth(220);
+    QVBoxLayout *sideLayout = new QVBoxLayout(sidebar);
 
-    connect(ui->resetHydrationButton, &QPushButton::clicked,
-            this, &MainWindow::onResetHydration);
+    QLabel *logo = new QLabel("HEALTHMATE AI");
+    logo->setObjectName("HeaderLabel");
+    logo->setAlignment(Qt::AlignCenter);
+    sideLayout->addWidget(logo);
+    sideLayout->addSpacing(20);
 
-    connect(ui->targetSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
-            this, &MainWindow::onTargetChanged);
+    QStringList navItems = {"Profile", "Hydration", "Medical History", "Lab Reports", "Medicines", "AI Assistant", "Summary"};
+    for(int i=0; i<navItems.size(); ++i) {
+        QPushButton *btn = new QPushButton("  " + navItems[i]);
+        btn->setObjectName("NavBtn");
+        btn->setCheckable(true);
+        btn->setAutoExclusive(true);
+        if(i==0) btn->setChecked(true);
+        btn->setProperty("index", i);
+        connect(btn, &QPushButton::clicked, this, &MainWindow::onNavButtonClicked);
+        sideLayout->addWidget(btn);
+    }
+    sideLayout->addStretch();
 
-    connect(ui->buttonMedAdd, &QPushButton::clicked,
-            this, &MainWindow::onButtonMedAddClicked);
+    // --- Stacked Content Area ---
+    mainStack = new QStackedWidget();
+    mainStack->addWidget(createProfileTab());
+    mainStack->addWidget(createHydrationTab());
+    mainStack->addWidget(createHistoryTab());
+    mainStack->addWidget(createLabTab());
+    mainStack->addWidget(createMedicineTab());
+    mainStack->addWidget(createAITab());
+    mainStack->addWidget(createSummaryTab());
 
-    connect(ui->buttonMedRemove, &QPushButton::clicked,
-            this, &MainWindow::onButtonMedRemoveClicked);
+    mainLayout->addWidget(sidebar);
+    mainLayout->addWidget(mainStack);
+    setCentralWidget(central);
+    setWindowTitle("HealthMate AI Pro - v2.0");
+    resize(1100, 750);
+}
 
-    connect(ui->btnAddLabReport,    &QPushButton::clicked,
-            this, &MainWindow::onAddLabReportClicked);
+// --- TAB BUILDERS ---
 
-    connect(ui->btnRemoveLabReport, &QPushButton::clicked,
-            this, &MainWindow::onRemoveLabReportClicked);
+QWidget* MainWindow::createProfileTab() {
+    QWidget *w = new QWidget();
+    QVBoxLayout *lay = new QVBoxLayout(w);
+    lay->setContentsMargins(50, 50, 50, 50);
 
-    connect(ui->btnAttachFile,      &QPushButton::clicked,
-            this, &MainWindow::onAttachFileClicked);
+    QLabel *t = new QLabel("Personal Bio-Data");
+    t->setStyleSheet("font-size: 22px; color: #38BDF8; margin-bottom: 20px;");
+    lay->addWidget(t);
 
-    connect(ui->btnAskAI,       &QPushButton::clicked,
-            this, &MainWindow::onAskAI);
-    connect(ui->btnClearAI,      &QPushButton::clicked,
-            this, &MainWindow::onClearAI);
-    connect(ui->btnGenerateHospitalPDF, &QPushButton::clicked,
-            this, &MainWindow::onGenerateHospitalSummaryClicked);
+    editName = new QLineEdit(); editName->setPlaceholderText("Full Name");
+    editAge = new QLineEdit(); editAge->setPlaceholderText("Age");
+    comboGender = new QComboBox(); comboGender->addItems({"MALE", "FEMALE", "OTHER"});
+    editEmergency = new QLineEdit(); editEmergency->setPlaceholderText("Emergency Phone Number");
+    editAllergies = new QLineEdit(); editAllergies->setPlaceholderText("Allergies (e.g. Peanuts, Penicillin)");
+    editChronic = new QLineEdit(); editChronic->setPlaceholderText("Chronic Conditions (e.g. Diabetes)");
 
-    setupHistoryTable();
-    if(m_userProfile.loadFromFile("profile.txt"))
-    {loadProfileToForm();}
+    lay->addWidget(new QLabel("Full Name")); lay->addWidget(editName);
+    lay->addWidget(new QLabel("Age")); lay->addWidget(editAge);
+    lay->addWidget(new QLabel("Gender Identity")); lay->addWidget(comboGender);
+    lay->addWidget(new QLabel("Allergies")); lay->addWidget(editAllergies);
+    lay->addWidget(new QLabel("Chronic Conditions")); lay->addWidget(editChronic);
+    lay->addWidget(new QLabel("Emergency Contact")); lay->addWidget(editEmergency);
 
-    loadHistoryFromFile();
+    QPushButton *saveBtn = new QPushButton("SAVE PROFILE TO SECURE STORAGE");
+    saveBtn->setObjectName("ActionBtn");
+    connect(saveBtn, &QPushButton::clicked, this, &MainWindow::onSaveProfileClicked);
+    lay->addWidget(saveBtn);
+    lay->addStretch();
+    return w;
+}
+
+QWidget* MainWindow::createHydrationTab() {
+    QWidget *w = new QWidget();
+    QVBoxLayout *lay = new QVBoxLayout(w);
+    lay->setContentsMargins(50, 50, 50, 50);
+
+    consumedDisplay = new QLCDNumber();
+    consumedDisplay->setSegmentStyle(QLCDNumber::Flat);
+    consumedDisplay->setMinimumHeight(150);
+    consumedDisplay->setStyleSheet("background: #1E293B; border: 2px solid #0EA5E9; color: #38BDF8;");
+
+    hydrationBar = new QProgressBar();
+    targetSpin = new QSpinBox();
+    targetSpin->setRange(500, 10000);
+    targetSpin->setSingleStep(250);
+    targetSpin->setSuffix(" ml");
+
+    lay->addWidget(new QLabel("TOTAL CONSUMED (ML)"));
+    lay->addWidget(consumedDisplay);
+    lay->addWidget(new QLabel("PROGRESS TOWARDS GOAL"));
+    lay->addWidget(hydrationBar);
+
+    QHBoxLayout *btns = new QHBoxLayout();
+    QPushButton *b1 = new QPushButton("ADD 250ML"); b1->setObjectName("ActionBtn");
+    QPushButton *b2 = new QPushButton("ADD 500ML"); b2->setObjectName("ActionBtn");
+    connect(b1, &QPushButton::clicked, this, &MainWindow::onAdd250);
+    connect(b2, &QPushButton::clicked, this, &MainWindow::onAdd500);
+    btns->addWidget(b1); btns->addWidget(b2);
+
+    lay->addLayout(btns);
+    lay->addWidget(new QLabel("ADJUST DAILY TARGET"));
+    lay->addWidget(targetSpin);
+
+    QPushButton *res = new QPushButton("RESET DAILY TRACKER");
+    res->setObjectName("SecondaryBtn");
+    connect(res, &QPushButton::clicked, this, &MainWindow::onResetHydration);
+    lay->addWidget(res);
+    lay->addStretch();
+
+    connect(targetSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &MainWindow::onTargetChanged);
+    return w;
+}
+
+QWidget* MainWindow::createHistoryTab() {
+    QWidget *w = new QWidget();
+    QVBoxLayout *lay = new QVBoxLayout(w);
+    tableHistory = new QTableWidget(0, 3);
+    tableHistory->setHorizontalHeaderLabels({"Date", "Condition", "Clinical Notes"});
+    tableHistory->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+
+    editHistDate = new QLineEdit(); editHistDate->setPlaceholderText("YYYY-MM-DD");
+    editHistCond = new QLineEdit(); editHistCond->setPlaceholderText("Condition Name");
+    textHistNotes = new QTextEdit(); textHistNotes->setPlaceholderText("Detailed symptoms or doctor's advice...");
+    textHistNotes->setMaximumHeight(100);
+
+    lay->addWidget(new QLabel("MEDICAL RECORDS LOG"));
+    lay->addWidget(tableHistory);
+    lay->addWidget(new QLabel("ADD NEW ENTRY"));
+    lay->addWidget(editHistDate);
+    lay->addWidget(editHistCond);
+    lay->addWidget(textHistNotes);
+
+    QHBoxLayout *btns = new QHBoxLayout();
+    QPushButton *addBtn = new QPushButton("ADD RECORD"); addBtn->setObjectName("ActionBtn");
+    QPushButton *remBtn = new QPushButton("DELETE SELECTED"); remBtn->setObjectName("SecondaryBtn");
+    connect(addBtn, &QPushButton::clicked, this, &MainWindow::onAddHistoryClicked);
+    connect(remBtn, &QPushButton::clicked, this, &MainWindow::onRemoveHistoryClicked);
+    btns->addWidget(addBtn); btns->addWidget(remBtn);
+    lay->addLayout(btns);
+    return w;
+}
+
+QWidget* MainWindow::createLabTab() {
+    QWidget *w = new QWidget();
+    QVBoxLayout *lay = new QVBoxLayout(w);
+    tableLabs = new QTableWidget(0, 5);
+    tableLabs->setHorizontalHeaderLabels({"Report", "Lab", "Date", "Notes", "File Path"});
+    tableLabs->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+
+    editLabName = new QLineEdit(); editLabName->setPlaceholderText("Report Title");
+    editLabPlace = new QLineEdit(); editLabPlace->setPlaceholderText("Lab Facility Name");
+    editLabDate = new QLineEdit(); editLabDate->setPlaceholderText("Date");
+    editLabFile = new QLineEdit(); editLabFile->setReadOnly(true); editLabFile->setPlaceholderText("No file attached");
+    textLabNotes = new QTextEdit(); textLabNotes->setPlaceholderText("Observation notes...");
+    textLabNotes->setMaximumHeight(80);
+
+    lay->addWidget(tableLabs);
+    lay->addWidget(editLabName);
+    lay->addWidget(editLabPlace);
+    lay->addWidget(editLabDate);
+    lay->addWidget(textLabNotes);
+
+    QHBoxLayout *fileLay = new QHBoxLayout();
+    fileLay->addWidget(editLabFile);
+    QPushButton *attBtn = new QPushButton("ATTACH FILE");
+    connect(attBtn, &QPushButton::clicked, this, &MainWindow::onAttachFileClicked);
+    fileLay->addWidget(attBtn);
+    lay->addLayout(fileLay);
+
+    QHBoxLayout *btns = new QHBoxLayout();
+    QPushButton *addBtn = new QPushButton("SAVE LAB REPORT"); addBtn->setObjectName("ActionBtn");
+    QPushButton *remBtn = new QPushButton("REMOVE RECORD"); remBtn->setObjectName("SecondaryBtn");
+    connect(addBtn, &QPushButton::clicked, this, &MainWindow::onAddLabReportClicked);
+    connect(remBtn, &QPushButton::clicked, this, &MainWindow::onRemoveLabReportClicked);
+    btns->addWidget(addBtn); btns->addWidget(remBtn);
+    lay->addLayout(btns);
+    return w;
+}
+
+QWidget* MainWindow::createMedicineTab() {
+    QWidget *w = new QWidget();
+    QVBoxLayout *lay = new QVBoxLayout(w);
+    tableMed = new QTableWidget(0, 5);
+    tableMed->setHorizontalHeaderLabels({"Name", "Dosage", "Frequency", "Time", "Notes"});
+    tableMed->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+
+    editMedName = new QLineEdit(); editMedName->setPlaceholderText("Medicine Name");
+    editMedDosage = new QLineEdit(); editMedDosage->setPlaceholderText("e.g. 500mg");
+    comboMedFreq = new QComboBox(); comboMedFreq->addItems({"Once a day", "Twice a day", "Thrice a day", "Every 6 hours", "Every 8 hours", "As Needed"});
+    timeMed = new QTimeEdit(QTime::currentTime());
+    textMedNotes = new QTextEdit(); textMedNotes->setMaximumHeight(80);
+
+    lay->addWidget(tableMed);
+    lay->addWidget(new QLabel("NEW PRESCRIPTION"));
+    lay->addWidget(editMedName);
+    lay->addWidget(editMedDosage);
+    lay->addWidget(comboMedFreq);
+    lay->addWidget(timeMed);
+    lay->addWidget(textMedNotes);
+
+    QHBoxLayout *btns = new QHBoxLayout();
+    QPushButton *addBtn = new QPushButton("ADD MEDICINE"); addBtn->setObjectName("ActionBtn");
+    QPushButton *remBtn = new QPushButton("REMOVE MEDICINE"); remBtn->setObjectName("SecondaryBtn");
+    connect(addBtn, &QPushButton::clicked, this, &MainWindow::onButtonMedAddClicked);
+    connect(remBtn, &QPushButton::clicked, this, &MainWindow::onButtonMedRemoveClicked);
+    btns->addWidget(addBtn); btns->addWidget(remBtn);
+    lay->addLayout(btns);
+    return w;
+}
+
+QWidget* MainWindow::createAITab() {
+    QWidget *w = new QWidget();
+    QVBoxLayout *lay = new QVBoxLayout(w);
+    lay->setContentsMargins(40, 40, 40, 40);
+
+    aiResponse = new QTextEdit(); aiResponse->setReadOnly(true);
+    aiResponse->setPlaceholderText("HealthMate AI Response will appear here...");
+    aiResponse->setStyleSheet("background: #0F172A; border: 1px solid #38BDF8; font-size: 11pt; color: #38BDF8;");
+
+    userQuery = new QTextEdit(); userQuery->setMaximumHeight(100);
+    userQuery->setPlaceholderText("Describe your symptoms or ask about medications...");
+
+    lay->addWidget(new QLabel("AI CLINICAL ASSISTANT"));
+    lay->addWidget(aiResponse);
+    lay->addWidget(userQuery);
+
+    QHBoxLayout *btns = new QHBoxLayout();
+    QPushButton *askBtn = new QPushButton("GENERATE AI ANALYSIS"); askBtn->setObjectName("ActionBtn");
+    QPushButton *clrBtn = new QPushButton("CLEAR CHAT"); clrBtn->setObjectName("SecondaryBtn");
+    connect(askBtn, &QPushButton::clicked, this, &MainWindow::onAskAI);
+    connect(clrBtn, &QPushButton::clicked, this, &MainWindow::onClearAI);
+    btns->addWidget(askBtn); btns->addWidget(clrBtn);
+    lay->addLayout(btns);
+    return w;
+}
+
+QWidget* MainWindow::createSummaryTab() {
+    QWidget *w = new QWidget();
+    QVBoxLayout *lay = new QVBoxLayout(w);
+    lay->setAlignment(Qt::AlignCenter);
+
+    QLabel *icon = new QLabel("📄");
+    icon->setStyleSheet("font-size: 80px;");
+    icon->setAlignment(Qt::AlignCenter);
+
+    QLabel *info = new QLabel("Hospital Summary Generator\n\nClick below to compile all your data into a professional PDF summary.");
+    info->setAlignment(Qt::AlignCenter);
+    info->setStyleSheet("font-size: 14pt; color: #94A3B8;");
+
+    QPushButton *genBtn = new QPushButton("GENERATE PDF FOR DOCTOR");
+    genBtn->setObjectName("ActionBtn");
+    genBtn->setFixedWidth(300);
+    connect(genBtn, &QPushButton::clicked, this, &MainWindow::onGenerateHospitalSummaryClicked);
+
+    lay->addStretch();
+    lay->addWidget(icon);
+    lay->addWidget(info);
+    lay->addSpacing(30);
+    lay->addWidget(genBtn);
+    lay->addStretch();
+    return w;
+}
+
+// --- NAVIGATION & SLOTS ---
+
+void MainWindow::onNavButtonClicked() {
+    QPushButton *btn = qobject_cast<QPushButton*>(sender());
+    int index = btn->property("index").toInt();
+    mainStack->setCurrentIndex(index);
+}
+
+void MainWindow::onSaveProfileClicked() {
+    m_userProfile.setName(editName->text().toStdString());
+    m_userProfile.setAge(editAge->text().toInt());
+    m_userProfile.setGender(comboGender->currentText().toStdString());
+    m_userProfile.setEmergencyContact(editEmergency->text().toStdString());
+    m_userProfile.setAllergies(editAllergies->text().toStdString());
+    m_userProfile.setChronicConditions(editChronic->text().toStdString());
+
+    if (m_userProfile.saveToFile("profile.txt"))
+        QMessageBox::information(this, "Success", "Profile data synchronized.");
+}
+
+void MainWindow::onAddHistoryClicked() {
+    QString date = editHistDate->text();
+    QString cond = editHistCond->text();
+    QString notes = textHistNotes->toPlainText();
+
+    if(date.isEmpty() || cond.isEmpty()) return;
+
+    m_medicalHistory.push_back(MedicalHistoryEntry(date.toStdString(), cond.toStdString(), notes.toStdString()));
     refreshHistoryTable();
-    if (m_hydration.loadFromFile("hydration.txt"))
-    {
-        ui->targetSpinBox->setValue(m_hydration.getTarget());
-        updateHydrationUI();
-    }
-    ui->tableWidgetLabReports->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    ui->tableWidgetMedicine->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    loadMedicineList();
-    setupLabReportsTable();
-    loadLabReportsFromFile();
-    refreshLabReportsTable();
-
-}
-MainWindow::~MainWindow()
-{
-    delete ui;
-}
-void MainWindow::onSaveProfileClicked()
-{
-
-    QString name      = ui->lineEditName->text();
-    QString ageText   = ui->lineEditAge->text();
-    QString gender    = ui->comboBoxGender->currentText();
-    QString emergency = ui->lineEditEmergency->text();
-    QString allergies = ui->lineEditAllergies->text();
-    QString chronic   = ui->lineEditChronic->text();
-
-    int age = ageText.toInt();
-
-    m_userProfile.setName(name.toStdString());
-    m_userProfile.setAge(age);
-    m_userProfile.setGender(gender.toStdString());
-    m_userProfile.setEmergencyContact(emergency.toStdString());
-    m_userProfile.setAllergies(allergies.toStdString());
-    m_userProfile.setChronicConditions(chronic.toStdString());
-
-
-     if (m_userProfile.saveToFile("profile.txt")) {
-         QMessageBox::information(this, "Profile Saved", "Profile saved successfully.");
-    } else {
-         QMessageBox::warning(this, "Error", "Could not save profile.");
-     }
-}
-void MainWindow::loadProfileToForm(){
-    ui->lineEditName->setText(QString::fromStdString(m_userProfile.getName()));
-    ui->lineEditAge->setText(QString::number(m_userProfile.getAge()));
-    ui->comboBoxGender->setCurrentText(QString::fromStdString(m_userProfile.getGender()));
-    ui->lineEditEmergency->setText(QString::fromStdString(m_userProfile.getEmergencyContact()));
-    ui->lineEditAllergies->setText(QString::fromStdString(m_userProfile.getAllergies()));
-    ui->lineEditChronic->setText(QString::fromStdString(m_userProfile.getChronicConditions()));
-}
-void MainWindow::setupHistoryTable(){
-    ui->tableWidgetHistory->setColumnCount(3);
-    QStringList headers;
-    headers<<"Date"<<"Condition"<<"Notes";
-    ui->tableWidgetHistory->setHorizontalHeaderLabels(headers);
-
-    ui->tableWidgetHistory->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    ui->tableWidgetHistory->setSelectionBehavior(QAbstractItemView::SelectRows);
-    ui->tableWidgetHistory->setSelectionMode(QAbstractItemView::SingleSelection);
-
-    ui->tableWidgetHistory->horizontalHeader()->setSectionResizeMode(
-        QHeaderView::Stretch);
-}
-void MainWindow::onAddHistoryClicked()
-{
-
-    QString date      = ui->lineEditHistoryDate->text();
-    QString condition = ui->lineEditHistoryCondition->text();
-    QString notes     = ui->textEditHistoryNotes->toPlainText();
-
-
-    if (date.isEmpty() || condition.isEmpty()) {
-        QMessageBox::warning(this, "Missing Data",
-                             "Please enter at least Date and Condition.");
-        return;
-    }
-
-
-    MedicalHistoryEntry entry(
-        date.toStdString(),
-        condition.toStdString(),
-        notes.toStdString()
-        );
-
-    m_medicalHistory.push_back(entry);
-
-    int row = ui->tableWidgetHistory->rowCount();
-    ui->tableWidgetHistory->insertRow(row);
-
-    ui->tableWidgetHistory->setItem(row,0,
-                                    new QTableWidgetItem(date));
-    ui->tableWidgetHistory->setItem(row, 1,
-                                    new QTableWidgetItem(condition));
-    ui->tableWidgetHistory->setItem(row, 2,
-                                    new QTableWidgetItem(notes));
-
-    ui->lineEditHistoryDate->clear();
-    ui->lineEditHistoryCondition->clear();
-    ui->textEditHistoryNotes->clear();
-
     saveHistoryToFile();
-
+    editHistDate->clear(); editHistCond->clear(); textHistNotes->clear();
 }
-void MainWindow::saveHistoryToFile()
-{
-    ofstream out("history.txt");
-    if (!out) {return;
-    }
 
-    for (const MedicalHistoryEntry &entry : m_medicalHistory) {
-        out << entry.getDate() << '\n';
-        out << entry.getConditionName() << '\n';
-        out << entry.getNotes() << '\n';
-    }
-}
-void MainWindow::refreshHistoryTable()
-{
-    ui->tableWidgetHistory->setRowCount(0);
-
-    for (const MedicalHistoryEntry &entry : m_medicalHistory) {
-        int row = ui->tableWidgetHistory->rowCount();
-        ui->tableWidgetHistory->insertRow(row);
-
-        ui->tableWidgetHistory->setItem(row, 0,
-                                        new QTableWidgetItem(QString::fromStdString(entry.getDate())));
-        ui->tableWidgetHistory->setItem(row, 1,
-                                        new QTableWidgetItem(QString::fromStdString(entry.getConditionName())));
-        ui->tableWidgetHistory->setItem(row, 2,
-                                        new QTableWidgetItem(QString::fromStdString(entry.getNotes())));
-    }
-}
-void MainWindow::onRemoveHistoryClicked()
-{
-    int row = ui->tableWidgetHistory->currentRow();
-    if (row < 0) {
-        QMessageBox::warning(this, "No selection",
-                             "Please select a row to remove.");
-        return;
-    }
-
-    // Remove from vector (same index) static cast=ai used
-    //also e.g if the user selected row = 2, you erase the 3rd element of vector array :
-    if (row >= 0 && row < static_cast<int>(m_medicalHistory.size())) {
+void MainWindow::onRemoveHistoryClicked() {
+    int row = tableHistory->currentRow();
+    if (row >= 0 && row < (int)m_medicalHistory.size()) {
         m_medicalHistory.erase(m_medicalHistory.begin() + row);
-    }
-
-
-    ui->tableWidgetHistory->removeRow(row);
-
-    saveHistoryToFile();
-}
-
-void MainWindow::loadHistoryFromFile()
-{
-    m_medicalHistory.clear();
-
-    ifstream in("history.txt");
-    if (!in) {
-        return;
-    }
-
-    string date;
-    string condition;
-    string notes;
-
-    while (true) {
-        if (!getline(in, date)) break;
-        if (!getline(in, condition)) break;
-        if (!getline(in, notes)) break;
-
-        MedicalHistoryEntry entry(date, condition, notes);
-        m_medicalHistory.push_back(entry);
+        refreshHistoryTable();
+        saveHistoryToFile();
     }
 }
-void MainWindow::onAdd250()
-{
-    m_hydration.addWater(250);
+
+void MainWindow::onAdd250() { m_hydration.addWater(250); updateHydrationUI(); }
+void MainWindow::onAdd500() { m_hydration.addWater(500); updateHydrationUI(); }
+void MainWindow::onResetHydration() { m_hydration.reset(); updateHydrationUI(); }
+void MainWindow::onTargetChanged(int v) { m_hydration.setTarget(v); updateHydrationUI(); }
+
+void MainWindow::updateHydrationUI() {
+    consumedDisplay->display(m_hydration.getConsumed());
+    hydrationBar->setValue(m_hydration.getPercentage());
     m_hydration.saveToFile("hydration.txt");
-    updateHydrationUI();
 }
-void MainWindow::onAdd500()
-{
-    m_hydration.addWater(500);
-    m_hydration.saveToFile("hydration.txt");
-    updateHydrationUI();
-}
-void MainWindow::onResetHydration()
-{
-    m_hydration.reset();
-    m_hydration.saveToFile("hydration.txt");
-    updateHydrationUI();
-}
-void MainWindow::updateHydrationUI()
-{
-    int consumed = m_hydration.getConsumed();
-    int percent  = m_hydration.getPercentage();
 
-    ui->hydrationProgressBar->setValue(percent);
-
-    if (ui->consumedLCD)
-        ui->consumedLCD->display(consumed);
-}
-void MainWindow::onTargetChanged(int value)
-{
-    m_hydration.setTarget(value);
-    m_hydration.saveToFile("hydration.txt");
-    updateHydrationUI();
-}
-void MainWindow::onButtonMedAddClicked()
-{
-    QString name = ui->lineEditMedName->text();
-    QString dosage = ui->lineEditMedDosage->text();
-    QString frequency = ui->comboBoxFrequency->currentText();
-    QTime time = ui->timeEditMedTime->time();
-    QString notes = ui->textEditMedNotes->toPlainText();
-
-    // Validation
-    if (name.isEmpty() || dosage.isEmpty()) {
-        QMessageBox::warning(this, "Input Error", "Please enter medicine name and dosage.");
-        return;
-    }
-
-
-    MedicineEntry med(name, dosage, frequency, time, notes);
-
+void MainWindow::onButtonMedAddClicked() {
+    MedicineEntry med(editMedName->text(), editMedDosage->text(), comboMedFreq->currentText(), timeMed->time(), textMedNotes->toPlainText());
+    if(med.getName().isEmpty()) return;
     m_medicineList.push_back(med);
-
-    int row = ui->tableWidgetMedicine->rowCount();
-    ui->tableWidgetMedicine->insertRow(row);
-    ui->tableWidgetMedicine->setItem(row, 0,
-                                     new QTableWidgetItem(med.getName()));
-    ui->tableWidgetMedicine->setItem(row, 1,
-                                     new QTableWidgetItem(med.getDosage()));
-    ui->tableWidgetMedicine->setItem(row, 2,
-                                     new QTableWidgetItem(med.getFrequency()));
-    ui->tableWidgetMedicine->setItem(row, 3,
-                                     new QTableWidgetItem(med.getTime().toString("hh:mm")));
-    ui->tableWidgetMedicine->setItem(row, 4,
-                                     new QTableWidgetItem(med.getNotes()));
-
-
-    ui->lineEditMedName->clear();
-    ui->lineEditMedDosage->clear();
-    ui->comboBoxFrequency->setCurrentIndex(0);
-    ui->timeEditMedTime->setTime(QTime::currentTime());
-    ui->textEditMedNotes->clear();
-
-     saveMedicineList();
+    refreshMedicineTable();
+    saveMedicineList();
+    editMedName->clear(); editMedDosage->clear();
 }
-void MainWindow::onButtonMedRemoveClicked()
-{
-    int row = ui->tableWidgetMedicine->currentRow();
 
-    if (row < 0) {
-        QMessageBox::warning(this, "Selection Error", "Please select a medicine to remove.");
-        return;
-    }
-
-    // Remove from vector
-    if (row < static_cast<int>(m_medicineList.size())) {
+void MainWindow::onButtonMedRemoveClicked() {
+    int row = tableMed->currentRow();
+    if(row >= 0 && row < (int)m_medicineList.size()){
         m_medicineList.erase(m_medicineList.begin() + row);
-    }
-
-
-    ui->tableWidgetMedicine->removeRow(row);
-       saveMedicineList();
-
-}
-void MainWindow::saveMedicineList()
-{
-    ofstream out("medicines.txt");
-    if (!out.is_open()) {
-        QMessageBox::warning(this, "Save Error", "Cannot open file for writing.");
-        return;
-    }
-
-    for (const auto &med : m_medicineList) {
-        out << med.getName().toStdString() << "\n";
-        out << med.getDosage().toStdString() << "\n";
-        out << med.getFrequency().toStdString() << "\n";
-        out << med.getTime().toString("hh:mm").toStdString() << "\n";
-        out << med.getNotes().toStdString() << "\n";
-    }
-
-    out.close();
-}
-void MainWindow::loadMedicineList()
-{
-    m_medicineList.clear();
-    ui->tableWidgetMedicine->setRowCount(0);
-
-   ifstream in("medicines.txt");
-    if (!in.is_open()) {
-        return;
-    }
-
-    string name, dosage, frequency, timeStr, notes;
-
-    while (true) {
-        if (!getline(in, name)) break;
-        if (!getline(in, dosage)) break;
-        if (!getline(in, frequency)) break;
-        if (!getline(in, timeStr)) break;
-        if (!getline(in, notes)) break;
-
-        QString qName = QString::fromStdString(name);
-        QString qDosage = QString::fromStdString(dosage);
-        QString qFrequency = QString::fromStdString(frequency);
-        QTime qTime = QTime::fromString(QString::fromStdString(timeStr), "hh:mm"); //ai used
-        QString qNotes = QString::fromStdString(notes);
-
-        // Create MedicineEntry
-        MedicineEntry med(qName, qDosage, qFrequency, qTime, qNotes);
-        m_medicineList.push_back(med);
-
-        // Add to table
-        int row = ui->tableWidgetMedicine->rowCount();
-        ui->tableWidgetMedicine->insertRow(row);
-        ui->tableWidgetMedicine->setItem(row, 0, new QTableWidgetItem(qName));
-        ui->tableWidgetMedicine->setItem(row, 1, new QTableWidgetItem(qDosage));
-        ui->tableWidgetMedicine->setItem(row, 2, new QTableWidgetItem(qFrequency));
-        ui->tableWidgetMedicine->setItem(row, 3, new QTableWidgetItem(qTime.toString("hh:mm")));
-        ui->tableWidgetMedicine->setItem(row, 4, new QTableWidgetItem(qNotes));
-    }
-
-}
-void MainWindow::setupLabReportsTable()
-{
-    ui->tableWidgetLabReports->setColumnCount(5);
-    QStringList headers;
-    headers << "Report Name" << "Lab Name" << "Date" << "Notes" << "Attached File";
-    ui->tableWidgetLabReports->setHorizontalHeaderLabels(headers);
-
-    ui->tableWidgetLabReports->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    ui->tableWidgetLabReports->setSelectionBehavior(QAbstractItemView::SelectRows);
-    ui->tableWidgetLabReports->setSelectionMode(QAbstractItemView::SingleSelection);
-
-    ui->tableWidgetLabReports->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-}
-void MainWindow::refreshLabReportsTable()
-{
-    ui->tableWidgetLabReports->setRowCount(0);
-
-    for (const LabReportEntry &report : m_labReports) {
-        int row = ui->tableWidgetLabReports->rowCount();
-        ui->tableWidgetLabReports->insertRow(row);
-
-        ui->tableWidgetLabReports->setItem(row, 0,
-                                           new QTableWidgetItem(QString::fromStdString(report.getReportName())));
-        ui->tableWidgetLabReports->setItem(row, 1,
-                                           new QTableWidgetItem(QString::fromStdString(report.getLabName())));
-        ui->tableWidgetLabReports->setItem(row, 2,
-                                           new QTableWidgetItem(QString::fromStdString(report.getDate())));
-        ui->tableWidgetLabReports->setItem(row, 3,
-                                           new QTableWidgetItem(QString::fromStdString(report.getNotes())));
-        ui->tableWidgetLabReports->setItem(row, 4,
-                                           new QTableWidgetItem(QString::fromStdString(report.getFilePath())));
+        refreshMedicineTable();
+        saveMedicineList();
     }
 }
 
-void MainWindow::onAddLabReportClicked()
-{
-    QString reportName = ui->lineEditLabReportName->text();
-    QString labName    = ui->lineEditLabName->text();
-    QString date       = ui->lineEditLabDate->text();
-    QString notes      = ui->textEditLabNotes->toPlainText();
-    QString filePath   = ui->lineEditLabFile->text();
-
-    if(reportName.isEmpty() || labName.isEmpty() || date.isEmpty()) {
-        QMessageBox::warning(this, "Missing Data", "please enter Report Name, Lab Name, and Date.");
-        return;
-    }
-
-    LabReportEntry entry(reportName.toStdString(),
-                         labName.toStdString(),
-                         date.toStdString(),
-                         notes.toStdString(),
-                         filePath.toStdString());
-
+void MainWindow::onAddLabReportClicked() {
+    LabReportEntry entry(editLabName->text().toStdString(), editLabPlace->text().toStdString(),
+                         editLabDate->text().toStdString(), textLabNotes->toPlainText().toStdString(),
+                         editLabFile->text().toStdString());
+    if(entry.getReportName().empty()) return;
     m_labReports.push_back(entry);
     refreshLabReportsTable();
     saveLabReportsToFile();
-
-    ui->lineEditLabReportName->clear();
-    ui->lineEditLabName->clear();
-    ui->lineEditLabDate->clear();
-    ui->textEditLabNotes->clear();
-    ui->lineEditLabFile->clear();
+    editLabName->clear(); editLabPlace->clear();
 }
 
-void MainWindow::onRemoveLabReportClicked()
-{
-    int row = ui->tableWidgetLabReports->currentRow();
-    if(row < 0) {
-        QMessageBox::warning(this, "No selection", "Please select a row to remove.");
-        return;
-    }
-
-    if(row >= 0 && row < static_cast<int>(m_labReports.size()))
+void MainWindow::onRemoveLabReportClicked() {
+    int row = tableLabs->currentRow();
+    if(row >= 0 && row < (int)m_labReports.size()){
         m_labReports.erase(m_labReports.begin() + row);
+        refreshLabReportsTable();
+        saveLabReportsToFile();
+    }
+}
 
+void MainWindow::onAttachFileClicked() {
+    QString fn = QFileDialog::getOpenFileName(this, "Select Report");
+    if(!fn.isEmpty()) editLabFile->setText(fn);
+}
+
+void MainWindow::onAskAI() {
+    QString q = userQuery->toPlainText();
+    if(!q.isEmpty()) aiResponse->setPlainText(ai.answerQuestion(q));
+}
+
+void MainWindow::onClearAI() { userQuery->clear(); aiResponse->clear(); }
+
+// --- PERSISTENCE ---
+
+void MainWindow::refreshHistoryTable() {
+    tableHistory->setRowCount(0);
+    for(const auto &e : m_medicalHistory) {
+        int r = tableHistory->rowCount(); tableHistory->insertRow(r);
+        tableHistory->setItem(r, 0, new QTableWidgetItem(QString::fromStdString(e.getDate())));
+        tableHistory->setItem(r, 1, new QTableWidgetItem(QString::fromStdString(e.getConditionName())));
+        tableHistory->setItem(r, 2, new QTableWidgetItem(QString::fromStdString(e.getNotes())));
+    }
+}
+
+void MainWindow::refreshLabReportsTable() {
+    tableLabs->setRowCount(0);
+    for(const auto &r : m_labReports) {
+        int row = tableLabs->rowCount(); tableLabs->insertRow(row);
+        tableLabs->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(r.getReportName())));
+        tableLabs->setItem(row, 1, new QTableWidgetItem(QString::fromStdString(r.getLabName())));
+        tableLabs->setItem(row, 2, new QTableWidgetItem(QString::fromStdString(r.getDate())));
+        tableLabs->setItem(row, 3, new QTableWidgetItem(QString::fromStdString(r.getNotes())));
+        tableLabs->setItem(row, 4, new QTableWidgetItem(QString::fromStdString(r.getFilePath())));
+    }
+}
+
+void MainWindow::refreshMedicineTable() {
+    tableMed->setRowCount(0);
+    for(const auto &m : m_medicineList) {
+        int r = tableMed->rowCount(); tableMed->insertRow(r);
+        tableMed->setItem(r, 0, new QTableWidgetItem(m.getName()));
+        tableMed->setItem(r, 1, new QTableWidgetItem(m.getDosage()));
+        tableMed->setItem(r, 2, new QTableWidgetItem(m.getFrequency()));
+        tableMed->setItem(r, 3, new QTableWidgetItem(m.getTime().toString()));
+        tableMed->setItem(r, 4, new QTableWidgetItem(m.getNotes()));
+    }
+}
+
+void MainWindow::saveHistoryToFile() {
+    std::ofstream out("history.txt");
+    for (const auto &e : m_medicalHistory) out << e.getDate() << "\n" << e.getConditionName() << "\n" << e.getNotes() << "\n";
+}
+
+void MainWindow::saveMedicineList() {
+    std::ofstream out("medicines.txt");
+    for (const auto &m : m_medicineList) out << m.getName().toStdString() << "\n" << m.getDosage().toStdString() << "\n" << m.getFrequency().toStdString() << "\n" << m.getTime().toString().toStdString() << "\n" << m.getNotes().toStdString() << "\n";
+}
+
+void MainWindow::saveLabReportsToFile() {
+    std::ofstream out("labreports.txt");
+    for(const auto &r : m_labReports) out << r.getReportName() << "\n" << r.getLabName() << "\n" << r.getDate() << "\n" << r.getNotes() << "\n" << r.getFilePath() << "\n";
+}
+
+void MainWindow::loadAllData() {
+    if(m_userProfile.loadFromFile("profile.txt")) {
+        editName->setText(QString::fromStdString(m_userProfile.getName()));
+        editAge->setText(QString::number(m_userProfile.getAge()));
+        comboGender->setCurrentText(QString::fromStdString(m_userProfile.getGender()));
+        editEmergency->setText(QString::fromStdString(m_userProfile.getEmergencyContact()));
+        editAllergies->setText(QString::fromStdString(m_userProfile.getAllergies()));
+        editChronic->setText(QString::fromStdString(m_userProfile.getChronicConditions()));
+    }
+    if (m_hydration.loadFromFile("hydration.txt")) {
+        targetSpin->setValue(m_hydration.getTarget());
+        updateHydrationUI();
+    }
+
+    // Load History
+    std::ifstream inH("history.txt");
+    std::string d, c, n;
+    while(std::getline(inH, d) && std::getline(inH, c) && std::getline(inH, n))
+        m_medicalHistory.push_back(MedicalHistoryEntry(d, c, n));
+    refreshHistoryTable();
+
+    // Load Labs
+    std::ifstream inL("labreports.txt");
+    std::string rn, ln, ld, lno, fp;
+    while(std::getline(inL, rn) && std::getline(inL, ln) && std::getline(inL, ld) && std::getline(inL, lno) && std::getline(inL, fp))
+        m_labReports.push_back(LabReportEntry(rn, ln, ld, lno, fp));
     refreshLabReportsTable();
-    saveLabReportsToFile();
+
+    // Load Meds
+    std::ifstream inM("medicines.txt");
+    std::string mn, md, mf, mt, mno;
+    while(std::getline(inM, mn) && std::getline(inM, md) && std::getline(inM, mf) && std::getline(inM, mt) && std::getline(inM, mno))
+        m_medicineList.push_back(MedicineEntry(QString::fromStdString(mn), QString::fromStdString(md), QString::fromStdString(mf), QTime::fromString(QString::fromStdString(mt)), QString::fromStdString(mno)));
+    refreshMedicineTable();
 }
 
-void MainWindow::onAttachFileClicked()
-{
-    QString fileName = QFileDialog::getOpenFileName(this, "Select Lab Report File");
-    if(!fileName.isEmpty()) {
-        ui->lineEditLabFile->setText(fileName);
-    }
-}
-void MainWindow::saveLabReportsToFile()
-{
-    ofstream out("labreports.txt");
-    if(!out) return;
+void MainWindow::onGenerateHospitalSummaryClicked() {
+    QString file = QFileDialog::getSaveFileName(this, "Save Summary", "Patient_Summary.pdf", "PDF (*.pdf)");
+    if (file.isEmpty()) return;
 
-    for(const LabReportEntry &r : m_labReports) {
-        out << r.getReportName() << "\n";
-        out << r.getLabName() << "\n";
-        out << r.getDate() << "\n";
-        out << r.getNotes() << "\n";
-        out << r.getFilePath() << "\n";
-    }
-}
-
-void MainWindow::loadLabReportsFromFile()
-{
-    m_labReports.clear();
-    ifstream in("labreports.txt");
-    if(!in) return;
-
-    string reportName, labName, date, notes, filePath;
-    while(getline(in, reportName)) {
-        if(!getline(in, labName)) break;
-        if(!getline(in, date)) break;
-        if(!getline(in, notes)) break;
-        if(!getline(in, filePath)) break;
-
-        LabReportEntry entry(reportName, labName, date, notes, filePath);
-        m_labReports.push_back(entry);
-    }
-}
-void MainWindow::onAskAI()
-{
-    QString question = ui->textEditUserQuestion->toPlainText().trimmed();
-    if (question.isEmpty()) {
-         QMessageBox::warning(this, "Input Error", "please enter a question.");
-        return;
-    }
-    QString response = ai.answerQuestion(question);
-    ui->textEditAiResponse->setPlainText(response);
-}
-
-void MainWindow::onClearAI()
-{
-    ui->textEditUserQuestion->clear();
-    ui->textEditAiResponse->clear();
-}
-void MainWindow::onGenerateHospitalSummaryClicked()
-{
-    QString file1 = QFileDialog::getSaveFileName(
-        this, "Save Patient Summary", "Patient_Summary.pdf", "PDF Files (*.pdf)"
-        );
-    if (file1.isEmpty()) return;
-
-    QPdfWriter pdf(file1);
+    QPdfWriter pdf(file);
     pdf.setPageSize(QPageSize::A4);
-    pdf.setResolution(96);
-
     QPainter painter(&pdf);
+    int y = 100;
 
+    painter.setFont(QFont("Arial", 20, QFont::Bold));
+    painter.drawText(2000, y, "MEDICAL SUMMARY REPORT"); y += 500;
 
-    const int margin = 40;
-    const int pageHeight = pdf.height() - margin;
-    int y = 60;
-    const int lineHeight = 30;
+    painter.setFont(QFont("Arial", 12));
+    painter.drawText(500, y, "Patient: " + QString::fromStdString(m_userProfile.getName())); y += 200;
+    painter.drawText(500, y, "Age: " + QString::number(m_userProfile.getAge())); y += 200;
+    painter.drawText(500, y, "Chronic Conditions: " + QString::fromStdString(m_userProfile.getChronicConditions())); y += 400;
 
-
-    auto writeLine = [&](const QString &text, int x = 40, bool isTitle = false) {
-        // Check if we need a new page
-        if (y + lineHeight > pageHeight) {
-            pdf.newPage();
-            y = 60; // Reset to top margin
-        }
-
-
-        if(isTitle) painter.setFont(QFont("Times", 14, QFont::Bold));
-        else painter.setFont(QFont("Times", 11));
-
-        painter.drawText(QRect(x, y, pdf.width() - 80, lineHeight),
-                         Qt::AlignLeft | Qt::AlignVCenter,
-                         text);
-        y += lineHeight;
-    };
-
-    painter.setFont(QFont("Times", 14, QFont::Bold));
-    painter.drawText(QRect(0, y, pdf.width(), 40), Qt::AlignCenter, "Patient Medical Summary");
-    y += 60;
-
-    writeLine("PATIENT PROFILE", 40, true); // Bold header
-    writeLine("Name: " + QString::fromStdString(m_userProfile.getName()), 60);
-    writeLine("Age: " + QString::number(m_userProfile.getAge()), 60);
-    writeLine("Gender: " + QString::fromStdString(m_userProfile.getGender()), 60);
-    writeLine("Emergency Contact: " + QString::fromStdString(m_userProfile.getEmergencyContact()), 60);
-    y += lineHeight;
-
-
-    writeLine("MEDICAL HISTORY", 40, true);
-    for (const auto &h : m_medicalHistory) {
-        writeLine(QString::fromStdString(h.getDate()) + " - " +
-                      QString::fromStdString(h.getConditionName()), 60);
+    painter.setFont(QFont("Arial", 14, QFont::Bold));
+    painter.drawText(500, y, "Active Medications:"); y += 250;
+    painter.setFont(QFont("Arial", 11));
+    for(const auto &m : m_medicineList) {
+        painter.drawText(700, y, m.getName() + " - " + m.getDosage() + " (" + m.getFrequency() + ")");
+        y += 200;
     }
-    y += lineHeight;
-
-    // ===== Medicines =====
-    writeLine("CURRENT MEDICINES", 40, true);
-    for (const auto &m : m_medicineList) {
-        writeLine(m.getName() + " | " + m.getDosage() + " | " + m.getFrequency(), 60);
-    }
-    y += lineHeight;
 
     painter.end();
-    QMessageBox::information(this, "Done", "Patient summary PDF created.");
+    QMessageBox::information(this, "PDF Export", "Summary has been generated successfully.");
 }

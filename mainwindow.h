@@ -1,21 +1,29 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
+
+#include <QMainWindow>
+#include <QStackedWidget>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QTableWidget>
+#include <QTextEdit>
+#include <QComboBox>
+#include <QSpinBox>
+#include <QProgressBar>
+#include <QLCDNumber>
+#include <QTimeEdit>
+#include <QLabel>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <vector>
+
+// Core Logic Headers
 #include "userprofile.h"
 #include "medicalhistoryentry.h"
 #include "hydrationtracker.h"
 #include "MedicineEntry.h"
 #include "labreportentry.h"
 #include "healthai.h"
-
-#include <vector>
-#include <QMainWindow>
-
-using namespace std;
-QT_BEGIN_NAMESPACE
-namespace Ui {
-class MainWindow;
-}
-QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
 {
@@ -24,7 +32,12 @@ class MainWindow : public QMainWindow
 public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+
 private slots:
+    // Navigation
+    void onNavButtonClicked();
+
+    // Logic Slots (Existing functionality)
     void onSaveProfileClicked();
     void onAddHistoryClicked();
     void onRemoveHistoryClicked();
@@ -38,34 +51,71 @@ private slots:
     void onAddLabReportClicked();
     void onRemoveLabReportClicked();
     void onAttachFileClicked();
-    void refreshLabReportsTable();
     void onAskAI();
     void onClearAI();
     void onGenerateHospitalSummaryClicked();
 
-
 private:
-    Ui::MainWindow *ui;
+    // UI Setup methods
+    void setupModernUI();
+    void createSidebar();
+    QWidget* createProfileTab();
+    QWidget* createHydrationTab();
+    QWidget* createHistoryTab();
+    QWidget* createLabTab();
+    QWidget* createMedicineTab();
+    QWidget* createAITab();
+    QWidget* createSummaryTab();
+
+    // Modern UI Elements
+    QStackedWidget *mainStack;
+    QWidget *sidebar;
+
+    // Profile Inputs
+    QLineEdit *editName, *editAge, *editEmergency, *editAllergies, *editChronic;
+    QComboBox *comboGender;
+
+    // Hydration UI
+    QProgressBar *hydrationBar;
+    QLCDNumber *consumedDisplay;
+    QSpinBox *targetSpin;
+
+    // History UI
+    QTableWidget *tableHistory;
+    QLineEdit *editHistDate, *editHistCond;
+    QTextEdit *textHistNotes;
+
+    // Medicine UI
+    QTableWidget *tableMed;
+    QLineEdit *editMedName, *editMedDosage;
+    QComboBox *comboMedFreq;
+    QTimeEdit *timeMed;
+    QTextEdit *textMedNotes;
+
+    // Lab UI
+    QTableWidget *tableLabs;
+    QLineEdit *editLabName, *editLabPlace, *editLabDate, *editLabFile;
+    QTextEdit *textLabNotes;
+
+    // AI UI
+    QTextEdit *aiResponse, *userQuery;
+
+    // Logic Data
     UserProfile m_userProfile;
     HydrationTracker m_hydration;
     HealthAI ai;
+    std::vector<LabReportEntry> m_labReports;
+    std::vector<MedicalHistoryEntry> m_medicalHistory;
+    std::vector<MedicineEntry> m_medicineList;
 
-    vector<LabReportEntry> m_labReports;
-    vector <MedicalHistoryEntry> m_medicalHistory;// Stores all medical entries
-    vector<MedicineEntry> m_medicineList;  // Stores all medicine entries
-
-    void loadProfileToForm();
-    void setupHistoryTable();
-    void refreshHistoryTable();
-
-    void loadHistoryFromFile();
+    // Persistence
+    void loadAllData();
     void saveHistoryToFile();
     void saveMedicineList();
-    void loadMedicineList();
-
-    void setupLabReportsTable();      // initialize headers, sizing
-    void saveLabReportsToFile();      // persist to "labreports.txt"
-    void loadLabReportsFromFile();    // load from file
-
+    void saveLabReportsToFile();
+    void refreshHistoryTable();
+    void refreshLabReportsTable();
+    void refreshMedicineTable();
 };
-#endif // MAINWINDOW_H
+
+#endif
